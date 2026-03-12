@@ -9,8 +9,25 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 import xarray as xr
+from tqdm import tqdm
 
-OBJECTS    = ["Sun", "Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "3I/ATLAS"]
+import warnings
+from astropy.utils.exceptions import ErfaWarning
+
+# Ignore all ErfaWarnings
+warnings.simplefilter('ignore', category=ErfaWarning)
+
+OBJECT_IDS    = {"Sun":20,
+                 "Mercury":199,
+                 "Venus":299,
+                 "Earth":399,
+                 "Mars":499,
+                 "Jupiter":599,
+                 "Saturn":699,
+                 "Uranus":799,
+                 "Neptune":899,
+                 "3I/ATLAS":"C/2025 N1"
+                }
 CENTER     = "@sun"
 START_DATE = Time("2025-05-07")
 TIME_STEP  = TimeDelta(1, format='jd') # How finely spaced the time axis is
@@ -21,31 +38,45 @@ SAVE_FILENAME   = "state_vectors.nc"
 N_TIME_STAMPS = int(np.floor((END_DATE - START_DATE)/TIME_STEP)) + 1
 TIME_STAMPS   = START_DATE + np.arange(N_TIME_STAMPS) * TIME_STEP
 
-KM_PER_AU = 149597870.7            # km per AU
-S_PER_DAY = 86400.0                # seconds per day
+CHUNK_SIZE = 50 # How many timestamps to request at once
+N_CHUNKS = int(np.ceil(N_TIME_STAMPS / CHUNK_SIZE))
+
+print(f"Requesting {N_TIME_STAMPS} time stamps from {START_DATE} to {END_DATE}. Making {N_CHUNKS} requests of maximum size {CHUNK_SIZE} timestamps each ")
 
 # Our data array, with dimensions [objects, timestamps, components]
 data = xr.DataArray(
-    np.zeros((len(OBJECTS), N_TIME_STAMPS, 6)),
+    np.zeros((len(OBJECT_IDS), N_TIME_STAMPS, 6)),
     dims=["object", "time", "component"],
     coords={
-        "object": OBJECTS,
-        "time": np.arange(1000),
+        "object": list(OBJECT_IDS.keys()),
+        "time": TIME_STAMPS.tdb.jd,
         "component": ["x","y","z","vx","vy","vz"] # Units are AU and days
     }
 )
 
-#Epoch array in the format NASA Horizons wants, only in the current chunk
-jd_epochs = TIME_STAMPS.tbd.jd
+# Loading bar
+with tqdm(total=len(OBJECT_IDS)*N_CHUNKS) as pbar:
+    # Query Horizons vectors at these epochs
+    for object, id in OBJECT_IDS.items():
 
-# Query Horizons vectors at these epochs
-for object in OBJECTS:
-    object_data = Horizons(id=object, location=CENTER, epochs=jd_epochs)
-    vec = object_data.vectors()   # returns astropy.table.Table
+        # Query and get all the vectors, once for each chunk
+        vec = np.array((N_TIME_STAMPS,))
+        for start_date in range(0, N_TIME_STAMPS, CHUNK_SIZE):
+            time_range = TIME_STAMPS[start_date:start_date+CHUNK_SIZE].tdb.jd
 
-    # extract the relevant columns (x,y,z in AU; vx,vy,vz in AU/day)
-    for component, _ in data.groupby("component"):
-        data[object, :, component] = np.array(vec[component], dtype=float)
+            # Make the query
+            if object == "3I/ATLAS":
+                object_data = Horizons(id=id, location=CENTER, epochs=time_range, id_type="smallbody")
+            else:
+                object_data = Horizons(id=id, location=CENTER, epochs=time_range)
+                
+            vec = object_data.vectors()
+
+            # Put the results into the DataArray
+            for component, _ in data.groupby("component"):
+                data.loc[object, time_range, component] = np.array(vec[component], dtype=float)
+            
+            pbar.update(1)
 
 # save to CSV
 data.to_netcdf(SAVE_FILENAME)
