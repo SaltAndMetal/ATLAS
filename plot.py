@@ -22,6 +22,11 @@ scat = ax.scatter(
     pos_np[0,:,2]
 )
 
+# fix bounds of the axis
+ax.set_xlim(pos_np[:,:,0].min(), pos_np[:,:,0].max())
+ax.set_ylim(pos_np[:,:,1].min(), pos_np[:,:,1].max())
+ax.set_zlim(pos_np[:,:,2].min(), pos_np[:,:,2].max())
+
 def update(frame):
     scat._offsets3d = (
         pos_np[frame,:,0],
