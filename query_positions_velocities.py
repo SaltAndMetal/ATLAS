@@ -30,8 +30,8 @@ OBJECT_IDS    = {"Sun":20,
                 }
 CENTER     = "@sun"
 START_DATE = Time("2025-05-07")
-TIME_STEP  = TimeDelta(1, format='jd') # How finely spaced the time axis is
-END_DATE   = Time("2027-01-01")
+TIME_STEP  = TimeDelta(1, format='jd')
+END_DATE   = Time("2028-01-01")
 SAVE_FILENAME   = "state_vectors.nc"
 
 # Calculate how many timestamps we have and generate a numpy array of them
@@ -45,12 +45,12 @@ print(f"Requesting {N_TIME_STAMPS} time stamps from {START_DATE} to {END_DATE}. 
 
 # Our data array, with dimensions [objects, timestamps, components]
 data = xr.DataArray(
-    np.zeros((len(OBJECT_IDS), N_TIME_STAMPS, 6)),
+    np.zeros((len(OBJECT_IDS), N_TIME_STAMPS, 8)),
     dims=["object", "time", "component"],
     coords={
         "object": list(OBJECT_IDS.keys()),
         "time": TIME_STAMPS.tdb.jd,
-        "component": ["x","y","z","vx","vy","vz"] # Units are AU and days
+        "component": ["x","y","z","RA","DEC","SMAA_3sigma","SMIA_3sigma","Theta_3sigma"] # Units are AU and days
     }
 )
 
@@ -71,10 +71,15 @@ with tqdm(total=len(OBJECT_IDS)*N_CHUNKS) as pbar:
                 object_data = Horizons(id=id, location=CENTER, epochs=time_range)
                 
             vec = object_data.vectors()
+            eph = object_data.ephemerides()
 
             # Put the results into the DataArray
             for component, _ in data.groupby("component"):
-                data.loc[object, time_range, component] = np.array(vec[component], dtype=float)
+                # The columns we want are either under vectors or ephemerides
+                try:
+                    data.loc[object, time_range, component] = np.array(vec[component], dtype=float)
+                except:
+                    data.loc[object, time_range, component] = np.array(eph[component], dtype=float)
             
             pbar.update(1)
 
